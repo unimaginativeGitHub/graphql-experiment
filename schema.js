@@ -10,6 +10,8 @@ const util = require('util');
 
 const parseXML = util.promisify(require('xml2js').parseString)
 
+const grabGoodReads = (entity, id) => `https://goodreads.com/${entity}/show/${id}?key=aCRhj2r5RxNoYUkAQTUTw`;
+
 const BookType = new GraphQLObjectType({
   name: 'Book',
   description: '...',
@@ -17,23 +19,15 @@ const BookType = new GraphQLObjectType({
   fields: {
     title: {
       type: GraphQLString,
-      resolve: book => book.title[0],
+      resolve: ({ GoodreadsResponse: { book } }) => book[0].title[0],
     },
     isbn: {
       type: GraphQLString,
-      resolve: (book) => {
-        if (typeof book.isbn[0] === 'string') {
-          return book.isbn[0];
-        } else if (typeof book.isbn13[0] === 'string') {
-          return book.isbn[0];
-        } else {
-          return '<isbn missing>';
-        }
-      }
+      resolve: ({ GoodreadsResponse: { book } }) => book[0].isbn[0],
     },
     published: {
       type: GraphQLString,
-      resolve: book => book.publication_year[0]
+      resolve: ({ GoodreadsResponse: { book } }) => book[0].publication_year[0],
     }
   }
 });
@@ -49,7 +43,14 @@ const AuthorType = new GraphQLObjectType({
     },
     books: {
       type: GraphQLList(BookType),
-      resolve: (xml) => xml.GoodreadsResponse.author[0].books[0].book,
+      resolve: (xml) => {
+        console.log('retrieving books for selected author');
+        const ids = xml.GoodreadsResponse.author[0].books[0].book.map(elem => elem.id[0]._);
+        return Promise.all(ids.map(id => fetch(grabGoodReads('book', id))
+          .then(response => response.text())
+          .then(parseXML)
+        ));
+      },
     },
   }),
 });
@@ -65,11 +66,9 @@ module.exports = new GraphQLSchema({
         args: {
           id: { type: GraphQLInt },
         },
-        resolve: (root, args) => fetch(
-          `https://goodreads.com/author/show.xml?id=${args.id}&key=aCRhj2r5RxNoYUkAQTUTw`
-        )
-        .then(response => response.text())
-        .then(parseXML), // graph ql uses to aquire the data
+        resolve: (root, args) => fetch(grabGoodReads('author', args.id))
+          .then(response => response.text())
+          .then(parseXML),
       },
     }),
   }),
